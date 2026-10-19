@@ -1,19 +1,18 @@
 package server
 
 import (
-	
 	"net/http"
 
 	"github.com/NIROOZbx/rag-tutorial.git/internal/handler"
-	"github.com/NIROOZbx/rag-tutorial.git/internal/worker"
 )
 
-func New(pool *worker.Pool) *http.ServeMux {
-    mux := http.NewServeMux()
+func New(h *handler.UploadHandler) *http.ServeMux {
 
-    mux.HandleFunc("GET /health", handler.HealthHandler)
-    mux.HandleFunc("POST /question", handler.AskQuestionHandler)
-    mux.HandleFunc("POST /upload", handler.UploadDocumentHandler(pool))
+	mux := http.NewServeMux()
 
-    return mux
+	mux.HandleFunc("GET /health", handler.HealthHandler)
+	mux.HandleFunc("POST /question", handler.AskQuestionHandler)
+	mux.HandleFunc("POST /upload", h.UploadDocumentHandler)
+
+	return mux
 }
