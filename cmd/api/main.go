@@ -14,6 +14,7 @@ import (
 
 	"github.com/NIROOZbx/rag-tutorial.git/internal/database"
 	"github.com/NIROOZbx/rag-tutorial.git/internal/embedding"
+	"github.com/NIROOZbx/rag-tutorial.git/internal/groq"
 	"github.com/NIROOZbx/rag-tutorial.git/internal/handler"
 	"github.com/NIROOZbx/rag-tutorial.git/internal/repository"
 	"github.com/NIROOZbx/rag-tutorial.git/internal/server"
@@ -40,6 +41,12 @@ func main() {
 	}
 	log.Print("Gemini client initialized")
 
+	answerGenerator, err := groq.NewClient(os.Getenv("GROQ_API_KEY"))
+	if err != nil {
+		log.Fatalf("initialize Groq client: %v", err)
+	}
+	log.Print("Groq answer generator initialized")
+
 	databasePool, err := database.Connect(ctx, os.Getenv("SUPABASE_DB_URL"))
 	if err != nil {
 		log.Fatalf("connect to Supabase Postgres: %v", err)
@@ -60,18 +67,19 @@ func main() {
 		log.Print("PDF worker pool closed")
 	}()
 
-	chunkRepo:=repository.NewChunkRepository(databasePool)
+	chunkRepo := repository.NewChunkRepository(databasePool)
 
-	ingestionService := service.NewIngestionService(pdfPool, geminiClient,chunkRepo)
+	ingestionService := service.NewIngestionService(pdfPool, geminiClient, chunkRepo)
 
 	uploadHandler := handler.NewUploadDocumentHandler(ingestionService)
-
+	answerService := service.NewAnswerService(chunkRepo, geminiClient, answerGenerator)
+	questionHandler := handler.NewQuestionHandler(answerService)
 
 	log.Print("ingestion service and HTTP handlers initialized")
 
 	httpServer := &http.Server{
 		Addr:              ":8080",
-		Handler:           server.New(uploadHandler),
+		Handler:           server.New(uploadHandler, questionHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
