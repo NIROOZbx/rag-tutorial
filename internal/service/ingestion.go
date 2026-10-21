@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/NIROOZbx/rag-tutorial.git/internal/document"
 	"github.com/NIROOZbx/rag-tutorial.git/internal/embedding"
@@ -24,37 +25,35 @@ func NewIngestionService(pool *worker.Pool, geminiClient *embedding.GeminiClient
 	}
 }
 
-func (g *Ingestion) Ingest(ctx context.Context, fileName string, pdfData []byte) (uuid.UUID,int, error) {
+func (g *Ingestion) Ingest(ctx context.Context, fileName string, pdfData []byte) (uuid.UUID, int, error) {
 	text, err := g.Pool.Submit(ctx, pdfData)
-    if err != nil {
-        return uuid.Nil, 0, err
-    }
+	if err != nil {
+		return uuid.Nil, 0, err
+	}
 
-    chunks := document.ChunkText(text, 500)
+	chunks := document.ChunkText(text, 500)
+	if len(chunks) == 0 {
+		return uuid.Nil, 0, fmt.Errorf("PDF contains no extractable text")
+	}
 
-    docID, err := g.Repo.CreateDocument(ctx, fileName)
-    if err != nil {
-        return uuid.Nil, 0, err
-    }
+	chunkRecords := make([]repository.ChunkParameters, 0, len(chunks))
+	for i, chunk := range chunks {
+		vector, err := g.GeminiClient.Embed(ctx, chunk)
+		if err != nil {
+			return uuid.Nil, 0, fmt.Errorf("embed chunk %d: %w", i, err)
+		}
 
-    for i, chunk := range chunks {
-        vector, err := g.GeminiClient.Embed(ctx, chunk)
-        if err != nil {
-            return docID, 0, err
-        }
+		chunkRecords = append(chunkRecords, repository.ChunkParameters{
+			ChunkIndex: i,
+			Content:    chunk,
+			Embedding:  vector,
+		})
+	}
 
-        err = g.Repo.Save(ctx, repository.SaveParameters{
-            DocID:      docID,
-            ChunkIndex: i,
-            Content:    chunk,
-            Embedding:  vector,
-        })
-        if err != nil {
-            return docID, 0, err
-        }
-    }
+	docID, err := g.Repo.SaveDocumentWithChunks(ctx, fileName, chunkRecords)
+	if err != nil {
+		return uuid.Nil, 0, err
+	}
 
-    return docID, len(chunks), nil
+	return docID, len(chunks), nil
 }
-
-

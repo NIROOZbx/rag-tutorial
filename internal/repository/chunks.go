@@ -3,8 +3,9 @@ package repository
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 )
@@ -17,11 +18,10 @@ func NewChunkRepository(db *pgxpool.Pool) *ChunkRepository {
 	return &ChunkRepository{db: db}
 }
 
-type SaveParameters struct {
-	DocID uuid.UUID
-	ChunkIndex   int
-	Content      string
-	Embedding    []float32
+type ChunkParameters struct {
+	ChunkIndex int
+	Content    string
+	Embedding  []float32
 }
 
 type SearchResult struct {
@@ -29,49 +29,56 @@ type SearchResult struct {
 	Content      string
 }
 
-func (r *ChunkRepository) CreateDocument(ctx context.Context,fileName string,) (uuid.UUID, error) {
-    var docID uuid.UUID
+func (r *ChunkRepository) SaveDocumentWithChunks(ctx context.Context, fileName string, chunks []ChunkParameters) (uuid.UUID, error) {
+	for _, chunk := range chunks {
+		if len(chunk.Embedding) != 3072 {
+			return uuid.Nil, fmt.Errorf("chunk %d: expected 3072 embedding dimensions, got %d", chunk.ChunkIndex, len(chunk.Embedding))
+		}
+	}
 
-    err := r.db.QueryRow(ctx, `
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("begin document transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(context.Background())
+	}()
+
+	var docID uuid.UUID
+	err = tx.QueryRow(ctx, `
         INSERT INTO documents (document_name)
         VALUES ($1)
         RETURNING id
     `, fileName).Scan(&docID)
 
-    if err != nil {
-        return uuid.Nil, fmt.Errorf("create document: %w", err)
-    }
-
-    return docID, nil
-}
-
-
-func (r *ChunkRepository) Save(ctx context.Context, args SaveParameters) error {
-	if len(args.Embedding) != 3072 {
-		return fmt.Errorf(
-			"expected 3072 embedding dimensions, got %d",
-			len(args.Embedding),
-		)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("create document: %w", err)
 	}
 
-	_, err := r.db.Exec(ctx, `
+	for _, chunk := range chunks {
+		_, err := tx.Exec(ctx, `
 		INSERT INTO document_chunks
-			(chunk_index, content, embedding,document_id)
+			(chunk_index, content, embedding, document_id)
 		VALUES ($1, $2, $3, $4)
 	`,
-		args.ChunkIndex,
-		args.Content,
-		pgvector.NewVector(args.Embedding),
-		args.DocID,
-	)
-	if err != nil {
-		return fmt.Errorf("save chunk: %w", err)
+			chunk.ChunkIndex,
+			chunk.Content,
+			pgvector.NewVector(chunk.Embedding),
+			docID,
+		)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("save chunk %d: %w", chunk.ChunkIndex, err)
+		}
 	}
 
-	return nil
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, fmt.Errorf("commit document transaction: %w", err)
+	}
+
+	return docID, nil
 }
 
-func (r *ChunkRepository) Search(ctx context.Context, embedding []float32,docId uuid.UUID) ([]SearchResult, error) {
+func (r *ChunkRepository) Search(ctx context.Context, embedding []float32, docId uuid.UUID) ([]SearchResult, error) {
 
 	if len(embedding) != 3072 {
 		return nil, fmt.Errorf(
@@ -87,7 +94,7 @@ func (r *ChunkRepository) Search(ctx context.Context, embedding []float32,docId 
         WHERE c.document_id = $2
         ORDER BY c.embedding <=> $1
         LIMIT 5
-    `,pgvector.NewVector(embedding),docId)
+    `, pgvector.NewVector(embedding), docId)
 
 	if err != nil {
 		return nil, fmt.Errorf("search chunks: %w", err)
