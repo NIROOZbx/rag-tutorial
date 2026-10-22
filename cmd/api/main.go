@@ -78,10 +78,9 @@ func main() {
 	log.Print("ingestion service and HTTP handlers initialized")
 
 	httpServer := &http.Server{
-		Addr:              ":8080",
+		Addr:              ":" + envOrDefault("PORT", "8080"),
 		Handler:           server.New(uploadHandler, questionHandler),
 		ReadHeaderTimeout: 5 * time.Second,
-	
 	}
 
 	if err := runServer(httpServer); err != nil {
@@ -89,6 +88,14 @@ func main() {
 	}
 
 }
+
+func envOrDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
 func runServer(httpServer *http.Server) error {
 
 	listener, err := net.Listen("tcp", httpServer.Addr)

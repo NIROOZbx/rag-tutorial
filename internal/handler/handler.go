@@ -33,28 +33,32 @@ func NewUploadDocumentHandler(svc *service.Ingestion) *UploadHandler {
 func (u *UploadHandler) UploadDocumentHandler(w http.ResponseWriter, r *http.Request) {
 
 	const maxFileSize = 10 << 20 // 10 MB
+	log.Printf("upload request received: method=%s content_type=%q content_length=%d origin=%q", r.Method, r.Header.Get("Content-Type"), r.ContentLength, r.Header.Get("Origin"))
 
-    r.Body = http.MaxBytesReader(w, r.Body, maxFileSize)
+	r.Body = http.MaxBytesReader(w, r.Body, maxFileSize)
 
-    file, header, err := r.FormFile("document")
-    if err != nil {
-        var maxBytesErr *http.MaxBytesError
-        if errors.As(err, &maxBytesErr) {
-            http.Error(w, "File size exceeds 10 MB limit",
-                http.StatusRequestEntityTooLarge)
-            return
-        }
+	file, header, err := r.FormFile("document")
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			log.Printf("upload rejected: request exceeded %d byte limit", maxFileSize)
+			http.Error(w, "File size exceeds 10 MB limit",
+				http.StatusRequestEntityTooLarge)
+			return
+		}
 
-        http.Error(w, "Invalid or missing file",
-            http.StatusBadRequest)
-        return
-    }
+		log.Printf("upload rejected: parse multipart form: %v", err)
+		http.Error(w, "Invalid or missing file",
+			http.StatusBadRequest)
+		return
+	}
 	defer file.Close()
 
 	pdfName := header.Filename
 
 	data, err := io.ReadAll(file)
 	if err != nil {
+		log.Printf("upload rejected: read uploaded file %q: %v", pdfName, err)
 		http.Error(w, "Failed to read file", http.StatusBadRequest)
 		return
 	}
@@ -65,7 +69,7 @@ func (u *UploadHandler) UploadDocumentHandler(w http.ResponseWriter, r *http.Req
 		data,
 	)
 	if err != nil {
-		log.Println("PDF processing failed:", err)
+		log.Printf("PDF processing failed: file=%q bytes=%d error=%+v", pdfName, len(data), err)
 		http.Error(w, "PDF processing failed", http.StatusInternalServerError)
 		return
 	}
