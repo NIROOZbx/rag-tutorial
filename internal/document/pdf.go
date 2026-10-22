@@ -35,6 +35,7 @@ func ExtractPDFText(file io.Reader)(string,error){
 		return "", fmt.Errorf("read extracted text: %w", err)
 	}
 
+
 	return string(text), nil
 	
 }

@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
 	"github.com/google/uuid"
+	"strings"
 
 	"github.com/NIROOZbx/rag-tutorial.git/internal/embedding"
 	"github.com/NIROOZbx/rag-tutorial.git/internal/repository"
@@ -28,40 +28,39 @@ func NewAnswerService(repo *repository.ChunkRepository, embedder *embedding.Gemi
 	}
 }
 
-func (a *AnswerService) RetrieveAnswer(ctx context.Context, question string,docID uuid.UUID) (string, error) {
+func (a *AnswerService) RetrieveAnswer(ctx context.Context, question string, docID uuid.UUID) (string, error) {
 
 	vector, err := a.embedder.Embed(ctx, question)
 	if err != nil {
 		return "", err
 	}
 
-	results, err := a.ChunkRepo.Search(ctx, vector,docID)
+	results, err := a.ChunkRepo.Search(ctx, vector, docID)
 	if err != nil {
 		return "", err
 	}
 
-	 if len(results) == 0 {
-        return "I couldn't find any chunks for this document.", nil
-    }
+	if len(results) == 0 {
+		return "I couldn't find any chunks for this document.", nil
+	}
 
 	var contextBuilder strings.Builder
 
 	for _, result := range results {
-		    contextBuilder.WriteString("PDF: ")
-    contextBuilder.WriteString(result.DocumentName)
-    contextBuilder.WriteString("\n")
-    contextBuilder.WriteString(result.Content)
-    contextBuilder.WriteString("\n\n")
+		contextBuilder.WriteString("PDF: ")
+		contextBuilder.WriteString(result.DocumentName)
+		contextBuilder.WriteString("\n")
+		contextBuilder.WriteString(result.Content)
+		contextBuilder.WriteString("\n\n")
 	}
 
 	contextText := contextBuilder.String()
 
-
 	prompt := fmt.Sprintf(`Answer the question using only the context below 
 	If the answer isn't in the context, say you don't know.
 	Context:%s
-	Question:%s`, 
-	contextText, question)
+	Question:%s`,
+		contextText, question)
 
 	return a.generator.GenerateAnswer(ctx, prompt)
 

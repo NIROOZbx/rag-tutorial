@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -31,11 +32,23 @@ func NewUploadDocumentHandler(svc *service.Ingestion) *UploadHandler {
 
 func (u *UploadHandler) UploadDocumentHandler(w http.ResponseWriter, r *http.Request) {
 
-	file, header, err := r.FormFile("document")
-	if err != nil {
-		http.Error(w, "Missing file", http.StatusBadRequest)
-		return
-	}
+	const maxFileSize = 10 << 20 // 10 MB
+
+    r.Body = http.MaxBytesReader(w, r.Body, maxFileSize)
+
+    file, header, err := r.FormFile("document")
+    if err != nil {
+        var maxBytesErr *http.MaxBytesError
+        if errors.As(err, &maxBytesErr) {
+            http.Error(w, "File size exceeds 10 MB limit",
+                http.StatusRequestEntityTooLarge)
+            return
+        }
+
+        http.Error(w, "Invalid or missing file",
+            http.StatusBadRequest)
+        return
+    }
 	defer file.Close()
 
 	pdfName := header.Filename
@@ -91,9 +104,9 @@ func (h *QuestionHandler) AskQuestionHandler(w http.ResponseWriter, r *http.Requ
 	}
 
 	if request.DocID == uuid.Nil {
-    http.Error(w, "Document ID is required", http.StatusBadRequest)
-    return
-}
+		http.Error(w, "Document ID is required", http.StatusBadRequest)
+		return
+	}
 
 	answer, err := h.AnswerService.RetrieveAnswer(r.Context(), request.Question, request.DocID)
 	if err != nil {
